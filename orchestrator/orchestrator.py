@@ -19,6 +19,7 @@ from agents import (
     agent_kontur,
     agent_listorg,
     agent_b2bhouse,
+    agent_parserapi,
 )
 from risk_engine import (
     risk_tax,
@@ -123,12 +124,14 @@ async def run(inn: str, company_name: str = "") -> dict:
     kontur_task = asyncio.create_task(agent_kontur.fetch(inn, ogrn))
     listorg_task = asyncio.create_task(agent_listorg.fetch(inn, ogrn))
     b2bhouse_task = asyncio.create_task(agent_b2bhouse.fetch(inn, ogrn))
+    parserapi_task = asyncio.create_task(agent_parserapi.fetch(inn))
 
     results = await asyncio.gather(
         transparent_task, fssp_task, fedresurs_task,
         arbitr_task, bankrupt_task, rusprofile_task,
         media_task, ndp_task, inspections_task,
         tochka_task, kontur_task, listorg_task, b2bhouse_task,
+        parserapi_task,
         return_exceptions=True,
     )
 
@@ -148,6 +151,7 @@ async def run(inn: str, company_name: str = "") -> dict:
     kontur_data = safe(10)
     listorg_data = safe(11)
     b2bhouse_data = safe(12)
+    parserapi_data = safe(13)
 
     licenses_data = await agent_licenses.fetch(inn, okved_main, okved_additional)
 
@@ -172,6 +176,7 @@ async def run(inn: str, company_name: str = "") -> dict:
         "agent_kontur": kontur_data,
         "agent_listorg": listorg_data,
         "agent_b2bhouse": b2bhouse_data,
+        "agent_parserapi": parserapi_data,
     }
     _fill_demo_data(all_agents_data, inn, egrul_data)
     crosscheck_data = await agent_crosscheck.fetch(all_agents_data)

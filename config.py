@@ -8,6 +8,7 @@ OMNI_ROUTE_API_KEY = os.getenv("OMNI_ROUTE_API_KEY", "")
 FSSP_API_KEY = os.getenv("FSSP_API_KEY", "")
 CAPTCHA_API_KEY = os.getenv("CAPTCHA_API_KEY", "")
 PARSER_FSSP_BASE_URL = os.getenv("PARSER_FSSP_BASE_URL", "https://parser-api.com/parser/fssp_api")
+PARSER_API_KEY = os.getenv("PARSER_API_KEY", "d117c8b0e4d8bd9cb9f80dcfc612cd3d")
 
 MODEL_ANALYST = "deepseek/deepseek-chat"
 MODEL_WRITER = "deepseek/deepseek-chat"
