@@ -178,6 +178,46 @@ async def run(inn: str, company_name: str = "") -> dict:
         "agent_b2bhouse": b2bhouse_data,
         "agent_parserapi": parserapi_data,
     }
+
+    # Override old agents with parser-api data when available
+    pa_arbitr = parserapi_data.get("arbitr", {})
+    if pa_arbitr.get("cases"):
+        pa_arbitr.setdefault("as_plaintiff", 0)
+        pa_arbitr.setdefault("as_defendant", 0)
+        pa_arbitr.setdefault("tax_disputes", 0)
+        pa_arbitr.setdefault("total_claims_amount", 0)
+        for c in pa_arbitr.get("cases", []):
+            c.setdefault("role", "")
+            c.setdefault("amount", 0)
+            c.setdefault("subject", "")
+        all_agents_data["agent_arbitr"] = pa_arbitr
+
+    pa_fssp = parserapi_data.get("fssp", {})
+    if pa_fssp.get("proceedings"):
+        pa_fssp["has_proceedings"] = bool(pa_fssp.get("total_proceedings", 0))
+        normalized_proc = []
+        for p in pa_fssp.get("proceedings", []):
+            normalized_proc.append({
+                "number": p.get("number", ""),
+                "amount": p.get("debt", 0),
+                "subject": p.get("bailiff", ""),
+                "status": p.get("status", ""),
+            })
+        pa_fssp["proceedings"] = normalized_proc
+        all_agents_data["agent_fssp"] = pa_fssp
+
+    pa_nalog = parserapi_data.get("nalog_pb", {})
+    if pa_nalog.get("full_name"):
+        egrul_data["full_name"] = pa_nalog.get("full_name", egrul_data.get("full_name", ""))
+        egrul_data["address"] = pa_nalog.get("address", egrul_data.get("address", ""))
+        egrul_data["short_name"] = pa_nalog.get("short_name", egrul_data.get("short_name", ""))
+
+    pa_fedr = parserapi_data.get("fedresurs", {})
+    if pa_fedr.get("records") is not None:
+        all_agents_data["agent_fedresurs"] = {
+            **fedresurs_data,
+            "parserapi": pa_fedr,
+        }
     _fill_demo_data(all_agents_data, inn, egrul_data)
     crosscheck_data = await agent_crosscheck.fetch(all_agents_data)
     all_agents_data["agent_crosscheck"] = crosscheck_data

@@ -24,7 +24,6 @@ async def _send_long(update, text):
         if len(text) <= MAX_MSG_LEN:
             parts.append(text)
             break
-        # Split at last \n before limit
         split_at = text.rfind("\n", 0, MAX_MSG_LEN)
         if split_at == -1:
             split_at = MAX_MSG_LEN
@@ -37,7 +36,7 @@ async def _send_long(update, text):
 
 
 async def start(update, context):
-    await update.message.reply_text(
+    msg = (
         "👋 <b>Налоговое досье — бот проверки контрагентов</b>\n\n"
         "Просто отправь мне <b>ИНН</b> (10 или 12 цифр) организации — "
         "и я соберу полное досье из открытых источников.\n\n"
@@ -54,9 +53,9 @@ async def start(update, context):
         "Пример: <code>7707083893</code>\n\n"
         "Команды:\n"
         "/start — это сообщение\n"
-        "/help — справка",
-        parse_mode="HTML",
+        "/help — справка"
     )
+    await update.message.reply_text(msg, parse_mode="HTML")
 
 
 async def help_command(update, context):
@@ -101,10 +100,8 @@ async def handle_message(update, context):
     try:
         result = await run_orchestrator(inn, company_name=text if parsed["type"] == "name" else "")
 
-        # Build full Telegram messages from report data
         report_data = result.get("_report_data", {})
         if not report_data:
-            # Fallback: send simple summary
             await _send_long(update, result["summary"])
         else:
             messages = build_all_messages(
@@ -116,7 +113,6 @@ async def handle_message(update, context):
                 await _send_long(update, msg)
                 await asyncio.sleep(0.3)
 
-        # Attach DOCX file
         report_path = result.get("report_path")
         if report_path and os.path.exists(report_path):
             with open(report_path, "rb") as f:
@@ -136,20 +132,53 @@ async def handle_message(update, context):
         await update.message.reply_text(f"❌ Ошибка при анализе: {e}")
 
 
-def main():
-    if not TELEGRAM_BOT_TOKEN:
-        logger.error("TELEGRAM_BOT_TOKEN не задан! Запишите токен в .env")
-        return
-
+async def _run_bot():
     from telegram.ext import Application, CommandHandler, MessageHandler, filters
+    from telegram.error import Conflict
 
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+    await app.initialize()
+    await app.updater.start_polling(allowed_updates=["messages"], drop_pending_updates=True)
     logger.info("Бот запущен. Напишите /start в Telegram")
-    app.run_polling(allowed_updates=["messages"])
+
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    except asyncio.CancelledError:
+        raise
+    finally:
+        await app.updater.stop()
+        await app.shutdown()
+
+
+async def _watchdog():
+    from telegram.error import Conflict
+
+    retries = 0
+    while True:
+        try:
+            await _run_bot()
+            break
+        except Conflict:
+            retries += 1
+            wait = min(retries * 5, 60)
+            logger.warning(f"Conflict при запуске бота, повтор через {wait}с (попытка {retries})")
+            await asyncio.sleep(wait)
+        except Exception as e:
+            logger.error(f"Бот упал: {e}. Перезапуск через 5 сек...")
+            await asyncio.sleep(5)
+            retries = 0
+
+
+def main():
+    if not TELEGRAM_BOT_TOKEN:
+        logger.error("TELEGRAM_BOT_TOKEN не задан! Запишите токен в .env")
+        return
+    asyncio.run(_watchdog())
 
 
 if __name__ == "__main__":

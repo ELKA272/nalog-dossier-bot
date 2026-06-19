@@ -242,6 +242,28 @@ def build_all_messages(company_name: str, inn: str, data: dict) -> list:
             emoji = "🔴" if a.get("sentiment") == "negative" else "⚪"
             m4 += f"{emoji} {a.get('title', '')[:80]}\n"
 
+    # Parser-API sources
+    pa = agent.get("agent_parserapi", {})
+    if pa.get("api"):
+        m4 += f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n<b>📡 ДАННЫЕ PARSER-API</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        pa_arbitr = pa.get("arbitr", {})
+        if pa_arbitr.get("total_cases"):
+            m4 += f"⚖️ Арбитраж: {pa_arbitr.get('total_cases', 0)} дел\n"
+        pa_fssp = pa.get("fssp", {})
+        if pa_fssp.get("total_proceedings"):
+            m4 += f"🔨 ФССП: {pa_fssp.get('total_proceedings', 0)} производств"
+            if pa_fssp.get("total_debt"):
+                m4 += f", долг {_fmt(pa_fssp['total_debt'])}"
+            m4 += "\n"
+        pa_fedr = pa.get("fedresurs", {})
+        if pa_fedr.get("total_bankrupt"):
+            m4 += f"📋 Федресурс: {pa_fedr.get('total_bankrupt', 0)} записей о банкротстве\n"
+        pa_nalog = pa.get("nalog_pb", {})
+        if pa_nalog.get("restrictions"):
+            m4 += f"⛔ ФНС: {len(pa_nalog['restrictions'])} ограничений на руководителя\n"
+        if pa_nalog.get("disqualified"):
+            m4 += f"⛔ ФНС: {len(pa_nalog['disqualified'])} дисквалификаций\n"
+
     # Additional sources
     tc = agent.get("agent_tochka", {})
     kt = agent.get("agent_kontur", {})
