@@ -1,0 +1,154 @@
+[
+  {
+    "house": "Дом встреч",
+    "check_in": "2026-06-19",
+    "check_out": "2026-06-21",
+    "nights": 2,
+    "services": [
+      "bath",
+      "excursion",
+      "chaan"
+    ],
+    "total": 44500,
+    "guest_name": "Илья",
+    "guest_phone": "89056743287",
+    "guest_comment": "уют и тишина",
+    "user_id": 1939234547,
+    "id": 1,
+    "created_at": "2026-06-19T07:03:50.522497",
+    "status": "active"
+  },
+  {
+    "house": "Дом встреч",
+    "check_in": "2026-06-19",
+    "check_out": "2026-06-21",
+    "nights": 2,
+    "services": [
+      "bath",
+      "excursion",
+      "chaan"
+    ],
+    "total": 44500,
+    "guest_name": "Илья",
+    "guest_phone": "89056743287",
+    "guest_comment": "❌ Отмена",
+    "user_id": 1939234547,
+    "id": 2,
+    "created_at": "2026-06-19T07:05:50.413436",
+    "status": "active"
+  },
+  {
+    "house": "Дом встреч",
+    "check_in": "2026-06-19",
+    "check_out": "2026-06-21",
+    "nights": 2,
+    "services": [
+      "bath",
+      "excursion",
+      "chaan"
+    ],
+    "total": 44500,
+    "guest_name": "Илья",
+    "guest_phone": "89056743287",
+    "guest_comment": "📅 Бронь",
+    "user_id": 1939234547,
+    "id": 3,
+    "created_at": "2026-06-19T07:06:04.383702",
+    "status": "cancelled"
+  },
+  {
+    "house": "Дом встреч",
+    "check_in": "2026-06-19",
+    "check_out": "2026-06-21",
+    "nights": 2,
+    "services": [
+      "bath",
+      "excursion",
+      "chaan"
+    ],
+    "total": 44500,
+    "guest_name": "Илья",
+    "guest_phone": "89056743287",
+    "guest_comment": "📋 Мои брони",
+    "user_id": 1939234547,
+    "id": 4,
+    "created_at": "2026-06-19T07:06:09.494012",
+    "status": "active"
+  },
+  {
+    "house": "Дом встреч",
+    "check_in": "2026-06-19",
+    "check_out": "2026-06-21",
+    "nights": 2,
+    "services": [
+      "bath",
+      "excursion",
+      "chaan"
+    ],
+    "total": 44500,
+    "guest_name": "Илья",
+    "guest_phone": "89056743287",
+    "guest_comment": "❓ FAQ",
+    "user_id": 1939234547,
+    "id": 5,
+    "created_at": "2026-06-19T07:07:53.742566",
+    "status": "active"
+  },
+  {
+    "house": "Дом встреч",
+    "check_in": "2026-06-19",
+    "check_out": "2026-06-21",
+    "nights": 2,
+    "services": [
+      "bath",
+      "excursion",
+      "chaan"
+    ],
+    "total": 44500,
+    "guest_name": "Илья",
+    "guest_phone": "89056743287",
+    "guest_comment": "❓ FAQ",
+    "user_id": 1939234547,
+    "id": 6,
+    "created_at": "2026-06-19T07:08:08.622119",
+    "status": "active"
+  },
+  {
+    "house": "Дом встреч",
+    "check_in": "2026-06-19",
+    "check_out": "2026-06-21",
+    "nights": 2,
+    "services": [
+      "bath",
+      "excursion",
+      "chaan"
+    ],
+    "total": 44500,
+    "guest_name": "Илья",
+    "guest_phone": "89056743287",
+    "guest_comment": "📅 Бронь",
+    "user_id": 1939234547,
+    "id": 7,
+    "created_at": "2026-06-19T07:08:11.227366",
+    "status": "active"
+  },
+  {
+    "house": "Дом встреч",
+    "check_in": "2026-06-19",
+    "check_out": "2026-06-21",
+    "nights": 2,
+    "services": [
+      "bath",
+      "chaan",
+      "excursion"
+    ],
+    "total": 44500,
+    "guest_name": "Илья",
+    "guest_phone": "89111111111",
+    "guest_comment": "уюта и тишины",
+    "user_id": 1939234547,
+    "id": 8,
+    "created_at": "2026-06-19T07:14:07.073908",
+    "status": "cancelled"
+  }
+]
