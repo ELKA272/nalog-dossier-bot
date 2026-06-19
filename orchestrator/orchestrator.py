@@ -124,7 +124,7 @@ async def run(inn: str, company_name: str = "") -> dict:
     kontur_task = asyncio.create_task(agent_kontur.fetch(inn, ogrn))
     listorg_task = asyncio.create_task(agent_listorg.fetch(inn, ogrn))
     b2bhouse_task = asyncio.create_task(agent_b2bhouse.fetch(inn, ogrn))
-    parserapi_task = asyncio.create_task(agent_parserapi.fetch(inn))
+    parserapi_task = asyncio.create_task(agent_parserapi.fetch(inn, egrul_data.get("director", {}).get("fio", "")))
 
     results = await asyncio.gather(
         transparent_task, fssp_task, fedresurs_task,
