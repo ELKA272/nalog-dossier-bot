@@ -1,8 +1,50 @@
-import sys, os, asyncio, pandas as pd, streamlit as st
-from datetime import datetime
+import sys, os, asyncio, json, sqlite3, hashlib, pandas as pd, streamlit as st
+from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from utils.styles import get_css
 from agents import agent_ai_summary, agent_ai_qa
+
+try:
+    import altair as alt
+except ImportError:
+    os.system("pip3 install altair -q")
+    import altair as alt
+
+# ── Cache ──
+_CACHE_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "cache.db")
+os.makedirs(os.path.dirname(_CACHE_DB), exist_ok=True)
+
+def _init_cache():
+    with sqlite3.connect(_CACHE_DB) as c:
+        c.execute("CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, data TEXT, expires REAL)")
+
+def _cache_get(key: str) -> dict | None:
+    _init_cache()
+    with sqlite3.connect(_CACHE_DB) as c:
+        row = c.execute("SELECT data, expires FROM cache WHERE key=?", (key,)).fetchone()
+        if row and row[1] > datetime.now().timestamp():
+            return json.loads(row[0])
+    return None
+
+def _cache_set(key: str, data: dict, ttl_hours=24):
+    _init_cache()
+    with sqlite3.connect(_CACHE_DB) as c:
+        c.execute("INSERT OR REPLACE INTO cache (key, data, expires) VALUES (?, ?, ?)",
+                  (key, json.dumps(data, default=str), (datetime.now() + timedelta(hours=ttl_hours)).timestamp()))
+
+def _cache_clear():
+    _init_cache()
+    with sqlite3.connect(_CACHE_DB) as c:
+        c.execute("DELETE FROM cache WHERE expires < ?", (datetime.now().timestamp(),))
+        c.execute("VACUUM")
+
+# ── Helpers ──
+def _indicator(data, label_true="✅ Есть данные", label_false="⏳ Данные загружаются"):
+    """Show a small colored indicator for data readiness."""
+    if data:
+        st.success(label_true, icon="✅")
+    else:
+        st.info(label_false, icon="⏳")
 
 st.set_page_config(page_title="Налоговое досье", page_icon="🏢", layout="wide")
 
@@ -99,14 +141,18 @@ with st.sidebar:
     if st.session_state.analyzed_inn:
         st.caption(f"Текущий: {st.session_state.analyzed_inn}")
 
-    @st.cache_data(show_spinner=False)
-    def run_analysis(inn: str):
-        from orchestrator.orchestrator import run
-        return asyncio.run(run(inn))
-
     if run_btn and inn:
         with st.spinner("Сбор данных из открытых источников... Это может занять до 2 минут"):
-            st.session_state.result = run_analysis(inn)
+            cache_key = hashlib.md5(f"inn_{inn}".encode()).hexdigest()
+            cached = _cache_get(cache_key)
+            if cached:
+                st.session_state.result = cached
+                st.success(f"✅ Данные по ИНН {inn} загружены из кэша")
+            else:
+                from orchestrator.orchestrator import run
+                st.session_state.result = asyncio.run(run(inn))
+                _cache_set(cache_key, st.session_state.result)
+                _cache_clear()
             st.session_state.analyzed_inn = inn
             st.session_state.ai_summary = ""
             st.session_state.ai_loading = False
@@ -469,8 +515,17 @@ elif section == "finance":
         rev_data = {y: rev.get(y, 0) for y in ("2020", "2021", "2022", "2023", "2024") if rev.get(y)}
         if rev_data:
             df_rev = pd.DataFrame(list(rev_data.items()), columns=["Год", "Выручка"])
-            df_rev["Выручка"] = df_rev["Выручка"].apply(lambda x: round(x / 1e6, 2))
-            st.bar_chart(df_rev.set_index("Год"), use_container_width=True, height=350)
+            df_rev["Выручка_млн"] = df_rev["Выручка"].apply(lambda x: round(x / 1e6, 1))
+            chart = alt.Chart(df_rev).mark_bar(color="#3b82f6", cornerRadius=4).encode(
+                x=alt.X("Год:N", title="", axis=alt.Axis(labelAngle=0)),
+                y=alt.Y("Выручка_млн:Q", title="млн руб."),
+                tooltip=[alt.Tooltip("Год:N"), alt.Tooltip("Выручка_млн:Q", title="Выручка (млн)")],
+            ).properties(height=350).configure_axis(
+                labelFontSize=12, titleFontSize=13
+            )
+            text = chart.mark_text(align="center", baseline="bottom", dy=-5, fontSize=12,
+                                   color="#374151").encode(text=alt.Text("Выручка_млн:Q", format=".0f"))
+            st.altair_chart(chart + text, use_container_width=True)
             st.caption("Выручка в млн руб.")
 
     # Net assets
@@ -480,9 +535,59 @@ elif section == "finance":
         na_data = {y: net_assets.get(y, 0) for y in ("2020", "2021", "2022", "2023", "2024") if net_assets.get(y)}
         if na_data:
             df_na = pd.DataFrame(list(na_data.items()), columns=["Год", "Активы"])
-            df_na["Активы"] = df_na["Активы"].apply(lambda x: round(x / 1e6, 2))
-            st.bar_chart(df_na.set_index("Год"), use_container_width=True, height=350, color="#059669")
+            df_na["Активы_млн"] = df_na["Активы"].apply(lambda x: round(x / 1e6, 1))
+            chart2 = alt.Chart(df_na).mark_bar(color="#059669", cornerRadius=4).encode(
+                x=alt.X("Год:N", title="", axis=alt.Axis(labelAngle=0)),
+                y=alt.Y("Активы_млн:Q", title="млн руб."),
+                tooltip=[alt.Tooltip("Год:N"), alt.Tooltip("Активы_млн:Q", title="Активы (млн)")],
+            ).properties(height=350).configure_axis(
+                labelFontSize=12, titleFontSize=13
+            )
+            text2 = chart2.mark_text(align="center", baseline="bottom", dy=-5, fontSize=12,
+                                     color="#374151").encode(text=alt.Text("Активы_млн:Q", format=".0f"))
+            st.altair_chart(chart2 + text2, use_container_width=True)
             st.caption("Чистые активы в млн руб.")
+
+    # Net profit history
+    profit = rp.get("net_profit", {})
+    has_profit = any(profit.get(y) for y in ("2020", "2021", "2022", "2023", "2024"))
+    if has_profit:
+        st.markdown('<div class="section-title">📉 Чистая прибыль</div>', unsafe_allow_html=True)
+        profit_data = {y: profit.get(y, 0) for y in ("2020", "2021", "2022", "2023", "2024") if profit.get(y)}
+        if profit_data:
+            df_profit = pd.DataFrame(list(profit_data.items()), columns=["Год", "Прибыль"])
+            df_profit["Прибыль_млн"] = df_profit["Прибыль"].apply(lambda x: round(x / 1e6, 1))
+            color_col = alt.condition(
+                alt.datum.Прибыль_млн > 0, alt.value("#10b981"), alt.value("#ef4444")
+            )
+            chart3 = alt.Chart(df_profit).mark_bar(cornerRadius=4).encode(
+                x=alt.X("Год:N", title="", axis=alt.Axis(labelAngle=0)),
+                y=alt.Y("Прибыль_млн:Q", title="млн руб."),
+                color=color_col,
+                tooltip=[alt.Tooltip("Год:N"), alt.Tooltip("Прибыль_млн:Q", title="Прибыль (млн)")],
+            ).properties(height=350).configure_axis(
+                labelFontSize=12, titleFontSize=13
+            )
+            text3 = chart3.mark_text(align="center", baseline="bottom", dy=-5, fontSize=12,
+                                     color="#374151").encode(text=alt.Text("Прибыль_млн:Q", format=".0f"))
+            st.altair_chart(chart3 + text3, use_container_width=True)
+            st.caption("Чистая прибыль в млн руб.")
+
+    # Combined dashboard
+    rev = rp.get("revenue", {})
+    if any(rev.get(y) for y in ("2020", "2021", "2022", "2023", "2024")):
+        st.markdown('<div class="section-title">📊 Финансовый дашборд</div>', unsafe_allow_html=True)
+        rows = []
+        for y in ("2020", "2021", "2022", "2023", "2024"):
+            rv = rev.get(y)
+            pr = profit.get(y) if profit else None
+            na = net_assets.get(y) if net_assets else None
+            if any([rv, pr, na]):
+                rows.append({"Год": y, "Выручка": _fmt(rv) if rv else "—",
+                             "Прибыль": _fmt(pr) if pr else "—",
+                             "Активы": _fmt(na) if na else "—"})
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 # ══════════════════════════════════════════════════════════
 # COURT
@@ -505,6 +610,23 @@ elif section == "court":
     if ar.get("total_claims_amount"):
         st.markdown(f'<div class="card"><b>Общая сумма исков:</b> {_fmt(ar["total_claims_amount"])}</div>', unsafe_allow_html=True)
 
+    # Court timeline chart from arbitr_preview
+    arbitr_preview = ad.get("_irbis_arbitr_preview", [])
+    if isinstance(arbitr_preview, list) and len(arbitr_preview) > 1:
+        df_timeline = pd.DataFrame(arbitr_preview)
+        if "year" in df_timeline.columns and "count" in df_timeline.columns:
+            df_timeline["year"] = df_timeline["year"].astype(str)
+            df_timeline = df_timeline.sort_values("year")
+            st.markdown('<div class="section-title">📅 Динамика по годам</div>', unsafe_allow_html=True)
+            chart = alt.Chart(df_timeline).mark_bar(color="#f59e0b", cornerRadius=4).encode(
+                x=alt.X("year:N", title="", axis=alt.Axis(labelAngle=45, labelFontSize=10)),
+                y=alt.Y("count:Q", title="Количество дел"),
+                tooltip=[alt.Tooltip("year:N", title="Год"), alt.Tooltip("count:Q", title="Дел")],
+            ).properties(height=250)
+            text = chart.mark_text(align="center", baseline="bottom", dy=-4, fontSize=10,
+                                   color="#374151").encode(text=alt.Text("count:Q"))
+            st.altair_chart(chart + text, use_container_width=True)
+
     cases = ar.get("cases", [])
     if cases:
         df = pd.DataFrame(cases)
@@ -523,6 +645,7 @@ elif section == "court":
         st.caption(f"Показано {len(df)} из {ar.get('total_cases', 0)} дел")
     else:
         st.markdown('<div class="card card-green" style="text-align:center;">Судебные дела не найдены ✅</div>', unsafe_allow_html=True)
+        _indicator(ar.get("total_cases", 0) > 0, "✅ Всего дел известно из ЕГРЮЛ", "⏳ Детали дел загружаются — попробуйте позже")
 
 # ══════════════════════════════════════════════════════════
 # FSSP
@@ -537,6 +660,20 @@ elif section == "fssp":
     with cols[1]:
         st.markdown(f'<div class="card" style="text-align:center;"><div style="font-size:1.5rem;font-weight:700;">{_fmt(fs.get("total_debt", 0))}</div><div style="font-size:12px;color:#6b7280;">Общий долг</div></div>', unsafe_allow_html=True)
 
+    # FSSP breakdown chart
+    fssp_chart_data = ad.get("_irbis_fssp_preview_chart", [])
+    if isinstance(fssp_chart_data, list) and len(fssp_chart_data) > 1:
+        df_fc = pd.DataFrame(fssp_chart_data)
+        if "type" in df_fc.columns and "type_sum" in df_fc.columns:
+            df_fc = df_fc.sort_values("type_sum", ascending=False)
+            st.markdown('<div class="section-title">📊 Разбивка по типам долгов</div>', unsafe_allow_html=True)
+            chart = alt.Chart(df_fc).mark_bar(color="#dc2626", cornerRadius=4).encode(
+                x=alt.X("type:N", title="", axis=alt.Axis(labelAngle=35, labelFontSize=10), sort="-y"),
+                y=alt.Y("type_sum:Q", title="Сумма долга (₽)"),
+                tooltip=[alt.Tooltip("type:N", title="Тип"), alt.Tooltip("type_sum:Q", title="Сумма", format=",.0f")],
+            ).properties(height=300)
+            st.altair_chart(chart, use_container_width=True)
+
     procs = fs.get("proceedings", [])
     if procs:
         df = pd.DataFrame(procs)
@@ -549,6 +686,7 @@ elif section == "fssp":
         st.caption(f"Показано {len(procs)} из {fs.get('total_proceedings', 0)} производств")
     else:
         st.markdown('<div class="card card-green" style="text-align:center;">Исполнительные производства не найдены ✅</div>', unsafe_allow_html=True)
+        _indicator(fs.get("total_proceedings", 0) > 0, "✅ Количество известно из ЕГРЮЛ", "⏳ Детали загружаются — попробуйте позже")
 
 # ══════════════════════════════════════════════════════════
 # BANKRUPT

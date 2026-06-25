@@ -644,6 +644,8 @@ def _transform_ul(results: dict, inn: str) -> dict:
         },
         # ── All raw data ──
         "_irbis_raw": results,
+        "_irbis_arbitr_preview": results.get("arbitr_preview", []),
+        "_irbis_fssp_preview_chart": results.get("fssp_preview_chart", []),
         "_irbis_balance": balance_list,
         "_irbis_tax_modes": tax_mode_str,
         "_irbis_goscon": results.get("goscon_data", results.get("goscon_preview", [])),
@@ -759,6 +761,8 @@ def _transform_ip(results: dict, inn: str) -> dict:
                             "has_license": False, "risk_no_license": False},
         "agent_crosscheck": {"connections": []},
         "_irbis_raw": results,
+        "_irbis_arbitr_preview": results.get("arbitr_preview", []),
+        "_irbis_fssp_preview_chart": results.get("fssp_preview_chart", []),
         # ── People-specific _irbis_ keys ──
         "_irbis_sanctions": results.get("sanctions_data_v2", results.get("sanctions_data", {})),
         "_irbis_pledge": results.get("pledge_data", []),
