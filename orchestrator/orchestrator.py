@@ -1,26 +1,7 @@
 import asyncio
 from datetime import datetime
 from utils.logger import logger
-from agents import (
-    agent_egrul,
-    agent_transparent,
-    agent_fssp,
-    agent_fedresurs,
-    agent_arbitr,
-    agent_bankrupt,
-    agent_rusprofile,
-    agent_licenses,
-    agent_disqual,
-    agent_ndp,
-    agent_inspections,
-    agent_media,
-    agent_crosscheck,
-    agent_tochka,
-    agent_kontur,
-    agent_listorg,
-    agent_b2bhouse,
-    agent_parserapi,
-)
+from agents import agent_irbis
 from risk_engine import (
     risk_tax,
     risk_financial,
@@ -33,194 +14,22 @@ from risk_engine import (
 from report.report_builder import build
 
 
-def _fill_demo_data(all_agents: dict, inn: str, egrul: dict):
-    """Fill demo/fallback data for agents that failed, using known egrul data."""
-
-    is_ip = egrul.get("is_ip", False)
-    director_name = egrul.get("director", {}).get("fio", "")
-    company_name = egrul.get("full_name", "") or egrul.get("short_name", "")
-    okved = egrul.get("okved_main", "")
-    address = egrul.get("address", "")
-
-    # Agent Arbitr
-    ar = all_agents.get("agent_arbitr", {})
-    if ar.get("error") or (not ar.get("cases") and not ar.get("note")):
-        all_agents["agent_arbitr"] = {
-            "source": "Картотека арбитражных дел/kad.arbitr.ru",
-            "total_cases": 0, "as_plaintiff": 0, "as_defendant": 0,
-            "tax_disputes": 0, "total_claims_amount": 0, "cases": [],
-            "is_demo": True, "error": None,
-        }
-
-    # Agent FSSP
-    fssp = all_agents.get("agent_fssp", {})
-    if fssp.get("error") or not fssp.get("proceedings"):
-        all_agents["agent_fssp"] = {
-            "source": "ФССП/исполнительные производства",
-            "total_proceedings": 0, "total_debt": 0, "proceedings": [],
-            "is_demo": True, "error": None,
-        }
-
-    # Agent Transparent — use egrul data
-    tp = all_agents.get("agent_transparent", {})
-    if tp.get("error"):
-        all_agents["agent_transparent"] = {
-            "source": "Прозрачный бизнес/pb.nalog.ru",
-            "tax_debt": egrul.get("tax_debt", 0),
-            "taxes_paid": egrul.get("tax_paid", 0),
-            "employees_count": egrul.get("employees", 0),
-            "tax_burden_percent": egrul.get("tax_burden_percent", 0),
-            "income": egrul.get("revenue_2025", 0),
-            "expenses": egrul.get("expenses_2025", 0),
-            "is_demo": True, "error": None,
-        }
-
-    # Agent Media — generate based on company name
-    md = all_agents.get("agent_media", {})
-    if md.get("error") or (not md.get("media_articles") and not md.get("overall_sentiment")):
-        all_agents["agent_media"] = {
-            "source": "СМИ/репутация",
-            "overall_sentiment": "нейтральная",
-            "media_articles": [],
-            "note": "Поиск по СМИ временно недоступен. Проверьте вручную: Яндекс.Новости, e1.ru",
-            "is_demo": True, "error": None,
-        }
-
-    # Agent Rusprofile — use egrul financial data
-    rp = all_agents.get("agent_rusprofile", {})
-    if rp.get("error") or (not rp.get("revenue") and not rp.get("net_profit")):
-        rev = {}
-        if egrul.get("revenue_2025"):
-            rev["2025"] = egrul["revenue_2025"]
-        all_agents["agent_rusprofile"] = {
-            "source": "Rusprofile/rusprofile.ru",
-            "revenue": rev,
-            "net_profit": {},
-            "net_assets": {},
-            "is_demo": True, "error": None,
-        }
-
-
 async def run(inn: str, company_name: str = "") -> dict:
-    logger.info(f"Запуск сбора данных по ИНН {inn}")
+    logger.info(f"Запуск сбора данных (irbis) по ИНН {inn}")
 
-    # Phase 1: fast API-based agents to get OGRN
-    egrul_data = await agent_egrul.fetch(inn)
-    ogrn = egrul_data.get("ogrn", "")
-    okved_main = egrul_data.get("okved_main", "")
-    okved_additional = egrul_data.get("okved_additional", [])
-
-    # Phase 2: parallel agents
-    transparent_task = asyncio.create_task(agent_transparent.fetch(inn))
-    fssp_task = asyncio.create_task(agent_fssp.fetch(inn))
-    fedresurs_task = asyncio.create_task(agent_fedresurs.fetch(inn))
-    arbitr_task = asyncio.create_task(agent_arbitr.fetch(inn))
-    bankrupt_task = asyncio.create_task(agent_bankrupt.fetch(inn))
-    rusprofile_task = asyncio.create_task(agent_rusprofile.fetch(inn))
-    media_task = asyncio.create_task(agent_media.fetch(company_name, inn))
-    ndp_task = asyncio.create_task(agent_ndp.fetch(inn))
-    inspections_task = asyncio.create_task(agent_inspections.fetch(inn))
-    tochka_task = asyncio.create_task(agent_tochka.fetch(inn, ogrn))
-    kontur_task = asyncio.create_task(agent_kontur.fetch(inn, ogrn))
-    listorg_task = asyncio.create_task(agent_listorg.fetch(inn, ogrn))
-    b2bhouse_task = asyncio.create_task(agent_b2bhouse.fetch(inn, ogrn))
-    parserapi_task = asyncio.create_task(agent_parserapi.fetch(inn, egrul_data.get("director", {}).get("fio", "")))
-
-    results = await asyncio.gather(
-        transparent_task, fssp_task, fedresurs_task,
-        arbitr_task, bankrupt_task, rusprofile_task,
-        media_task, ndp_task, inspections_task,
-        tochka_task, kontur_task, listorg_task, b2bhouse_task,
-        parserapi_task,
-        return_exceptions=True,
-    )
-
-    def safe(idx):
-        return results[idx] if not isinstance(results[idx], Exception) else {"error": str(results[idx])}
-
-    transparent_data = safe(0)
-    fssp_data = safe(1)
-    fedresurs_data = safe(2)
-    arbitr_data = safe(3)
-    bankrupt_data = safe(4)
-    rusprofile_data = safe(5)
-    media_data = safe(6)
-    ndp_data = safe(7)
-    inspections_data = safe(8)
-    tochka_data = safe(9)
-    kontur_data = safe(10)
-    listorg_data = safe(11)
-    b2bhouse_data = safe(12)
-    parserapi_data = safe(13)
-
-    licenses_data = await agent_licenses.fetch(inn, okved_main, okved_additional)
-
-    persons = []
-    director_name = egrul_data.get("director", {}).get("fio", "")
-    if director_name:
-        persons.append(director_name)
-    for f in egrul_data.get("founders", []):
-        if f.get("fio"):
-            persons.append(f["fio"])
-    disqual_data = await agent_disqual.fetch(persons)
-
-    all_agents_data = {
-        "agent_egrul": egrul_data,
-        "agent_transparent": transparent_data,
-        "agent_fssp": fssp_data,
-        "agent_fedresurs": fedresurs_data,
-        "agent_arbitr": arbitr_data,
-        "agent_rusprofile": rusprofile_data,
-        "agent_media": media_data,
-        "agent_tochka": tochka_data,
-        "agent_kontur": kontur_data,
-        "agent_listorg": listorg_data,
-        "agent_b2bhouse": b2bhouse_data,
-        "agent_parserapi": parserapi_data,
-    }
-
-    # Override old agents with parser-api data when available
-    pa_arbitr = parserapi_data.get("arbitr", {})
-    if pa_arbitr.get("cases"):
-        pa_arbitr.setdefault("as_plaintiff", 0)
-        pa_arbitr.setdefault("as_defendant", 0)
-        pa_arbitr.setdefault("tax_disputes", 0)
-        pa_arbitr.setdefault("total_claims_amount", 0)
-        for c in pa_arbitr.get("cases", []):
-            c.setdefault("role", "")
-            c.setdefault("amount", 0)
-            c.setdefault("subject", "")
-        all_agents_data["agent_arbitr"] = pa_arbitr
-
-    pa_fssp = parserapi_data.get("fssp", {})
-    if pa_fssp.get("proceedings"):
-        pa_fssp["has_proceedings"] = bool(pa_fssp.get("total_proceedings", 0))
-        normalized_proc = []
-        for p in pa_fssp.get("proceedings", []):
-            normalized_proc.append({
-                "number": p.get("number", ""),
-                "amount": p.get("debt", 0),
-                "subject": p.get("bailiff", ""),
-                "status": p.get("status", ""),
-            })
-        pa_fssp["proceedings"] = normalized_proc
-        all_agents_data["agent_fssp"] = pa_fssp
-
-    pa_nalog = parserapi_data.get("nalog_pb", {})
-    if pa_nalog.get("full_name"):
-        egrul_data["full_name"] = pa_nalog.get("full_name", egrul_data.get("full_name", ""))
-        egrul_data["address"] = pa_nalog.get("address", egrul_data.get("address", ""))
-        egrul_data["short_name"] = pa_nalog.get("short_name", egrul_data.get("short_name", ""))
-
-    pa_fedr = parserapi_data.get("fedresurs", {})
-    if pa_fedr.get("records") is not None:
-        all_agents_data["agent_fedresurs"] = {
-            **fedresurs_data,
-            "parserapi": pa_fedr,
-        }
-    _fill_demo_data(all_agents_data, inn, egrul_data)
-    crosscheck_data = await agent_crosscheck.fetch(all_agents_data)
-    all_agents_data["agent_crosscheck"] = crosscheck_data
+    # ── Single call to ir-bis API replaces 12 old agents ──
+    agent_data = await agent_irbis.fetch(inn)
+    egrul_data = agent_data.get("agent_egrul", {})
+    transparent_data = agent_data.get("agent_transparent", {})
+    fssp_data = agent_data.get("agent_fssp", {})
+    bankrupt_data = agent_data.get("agent_bankrupt", {})
+    arbitr_data = agent_data.get("agent_arbitr", {})
+    rusprofile_data = agent_data.get("agent_rusprofile", {})
+    media_data = agent_data.get("agent_media", {})
+    ndp_data = agent_data.get("agent_ndp", {})
+    inspections_data = agent_data.get("agent_inspections", {})
+    licenses_data = agent_data.get("agent_licenses", {})
+    crosscheck_data = agent_data.get("agent_crosscheck", {"connections": []})
 
     # Risk calculation
     tax_risk = risk_tax.calculate(transparent_data)
@@ -257,7 +66,8 @@ async def run(inn: str, company_name: str = "") -> dict:
     if tax_risk["score"] > 20:
         recommendations.append(f"🔴 СРОЧНО: Провести анализ налоговой нагрузки ({tax_risk['score']}/100). Проверить обоснованность налоговых вычетов и расходов.")
     if transparent_data.get("tax_debt", 0) > 0:
-        recommendations.append(f"🔴 СРОЧНО: Погасить налоговую задолженность в размере {transparent_data.get('tax_debt')} руб.")
+        debt_val = transparent_data.get("tax_debt", 0)
+        recommendations.append(f"🔴 СРОЧНО: Погасить налоговую задолженность в размере {debt_val} руб.")
     if corporate_risk["score"] > 20:
         recommendations.append(f"🟡 ВАЖНО: Обратить внимание на корпоративные изменения за последние 6 месяцев. Проверить контрагентов на взаимозависимость.")
     if financial_risk["score"] > 20:
@@ -296,7 +106,7 @@ async def run(inn: str, company_name: str = "") -> dict:
     summary += f"\n\n✅ Полный отчёт — в DOCX-файле ниже 👇\n━━━━━━━━━━━━━━━━━━━━"
 
     report_data = {
-        "agent_data": all_agents_data,
+        "agent_data": agent_data,
         "scoring": scoring,
         "splitting": splitting_risk,
         "technical": technical_risk,
@@ -305,7 +115,18 @@ async def run(inn: str, company_name: str = "") -> dict:
         "corporate_risk": corporate_risk,
         "reputation_risk": reputation_risk,
         "licenses_data": licenses_data,
-        "disqual_data": disqual_data,
+        "disqual_data": {
+            "disqualified_persons": [
+                {
+                    "fio": d.get("fio", d.get("name", "")),
+                    "article": d.get("article", d.get("reason", "")),
+                    "start_date": d.get("start_date", d.get("date_start", "")),
+                    "end_date": d.get("end_date", d.get("date_end", "")),
+                }
+                for d in (agent_data.get("_irbis_disqualified", []) or [])
+                if isinstance(d, dict)
+            ],
+        },
         "top3_risks": top3,
         "recommendations": recommendations,
     }

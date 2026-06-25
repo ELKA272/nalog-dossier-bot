@@ -290,8 +290,18 @@ class ReportBuilder:
         agent = data.get("agent_data", {})
         lines = []
         for name, src_data in agent.items():
-            err = src_data.get("error")
-            lines.append(f"  {'✓' if not err else '✗'} {src_data.get('source', name)} {'(недоступен)' if err else ''}")
+            if name.startswith("_"):
+                continue
+            if isinstance(src_data, dict):
+                err = src_data.get("error")
+                src = src_data.get("source", name)
+                lines.append(f"  {'✓' if not err else '✗'} {src} {'(недоступен)' if err else ''}")
+            elif isinstance(src_data, list):
+                lines.append(f"  ✓ {name}")
+            else:
+                lines.append(f"  ✓ {name}")
+        # add ir-bis as the main source
+        lines.append("  ✓ ir-bis.org (ЕГРЮЛ, ФНС, ФССП, КАД Арбитраж, Федресурс, РНП и др.)")
         return lines
 
     def _save(self) -> str:

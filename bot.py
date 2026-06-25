@@ -9,9 +9,13 @@ from utils.logger import logger
 from utils.parser import parse_input
 from utils.telegram_reporter import build_all_messages
 from orchestrator.orchestrator import run as run_orchestrator
+from agents import agent_ai_summary, agent_ai_qa
 
 
 MAX_MSG_LEN = 4000
+
+_ai_cache: dict[int, dict] = {}
+_qa_waiting: set[int] = set()
 
 
 async def _send_long(update, text):
@@ -36,26 +40,31 @@ async def _send_long(update, text):
 
 
 async def start(update, context):
-    msg = (
-        "👋 <b>Налоговое досье — бот проверки контрагентов</b>\n\n"
-        "Просто отправь мне <b>ИНН</b> (10 или 12 цифр) организации — "
-        "и я соберу полное досье из открытых источников.\n\n"
-        "📋 Что будет в отчёте:\n"
-        "• Общая информация (ЕГРЮЛ)\n"
-        "• Руководители и учредители\n"
-        "• Финансовый анализ\n"
-        "• Судебные дела\n"
-        "• Исполнительные производства\n"
-        "• Налоговые, финансовые, корпоративные, репутационные риски\n"
-        "• Дробление бизнеса и признаки технической компании\n"
-        "• Вероятные претензии ФНС\n"
-        "• Рекомендации\n\n"
-        "Пример: <code>7707083893</code>\n\n"
-        "Команды:\n"
-        "/start — это сообщение\n"
-        "/help — справка"
-    )
-    await update.message.reply_text(msg, parse_mode="HTML")
+    try:
+        logger.info(f"Команда /start от {update.effective_user.username or update.effective_user.id}")
+        msg = (
+            "👋 <b>Налоговое досье — бот проверки контрагентов</b>\n\n"
+            "Просто отправь мне <b>ИНН</b> (10 или 12 цифр) организации — "
+            "и я соберу полное досье из открытых источников.\n\n"
+            "📋 Что будет в отчёте:\n"
+            "• Общая информация (ЕГРЮЛ)\n"
+            "• Руководители и учредители\n"
+            "• Финансовый анализ\n"
+            "• Судебные дела\n"
+            "• Исполнительные производства\n"
+            "• Налоговые, финансовые, корпоративные, репутационные риски\n"
+            "• Дробление бизнеса и признаки технической компании\n"
+            "• Вероятные претензии ФНС\n"
+            "• Рекомендации\n\n"
+            "Пример: <code>7707083893</code>\n\n"
+            "Команды:\n"
+            "/start — это сообщение\n"
+            "/help — справка"
+        )
+        await update.message.reply_text(msg, parse_mode="HTML")
+        logger.info(f"Ответ на /start отправлен")
+    except Exception as e:
+        logger.exception(f"Ошибка в start: {e}")
 
 
 async def help_command(update, context):
@@ -76,6 +85,21 @@ async def help_command(update, context):
 
 async def handle_message(update, context):
     text = update.message.text.strip()
+    chat_id = update.effective_chat.id
+
+    # Check if user is in Q&A mode
+    if chat_id in _qa_waiting:
+        _qa_waiting.discard(chat_id)
+        report_data = _ai_cache.get(chat_id)
+        if not report_data:
+            await update.message.reply_text("❌ Данные устарели. Запросите новый анализ.")
+            return
+        await update.message.reply_text("⏳ Думаю над ответом...")
+        qa_result = await agent_ai_qa.fetch(report_data, text)
+        answer = qa_result.get("answer", "❌ Ошибка")
+        await update.message.reply_text(f"🤖 <b>Ответ:</b>\n\n{answer}", parse_mode="HTML")
+        return
+
     parsed = parse_input(text)
 
     if parsed["type"] == "unknown":
@@ -127,22 +151,87 @@ async def handle_message(update, context):
             f"Проверено источников: 10+",
             parse_mode="HTML",
         )
+
+        if report_data:
+            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+            keyboard = [
+                [
+                    InlineKeyboardButton("📄 Кратко", callback_data=f"ai|brief|{inn}"),
+                    InlineKeyboardButton("📊 Детально", callback_data=f"ai|detailed|{inn}"),
+                    InlineKeyboardButton("📈 Сравнение", callback_data=f"ai|compare|{inn}"),
+                ]
+            ]
+            await update.message.reply_text(
+                "🧠 <b>AI-анализ контрагента</b>\nВыберите режим:",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+            _ai_cache[update.effective_chat.id] = report_data
+            _qa_waiting.discard(update.effective_chat.id)
     except Exception as e:
         logger.exception("Ошибка в обработке запроса")
         await update.message.reply_text(f"❌ Ошибка при анализе: {e}")
 
 
+async def ai_callback(update, context):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if data.startswith("ai|"):
+        parts = data.split("|", 2)
+        if len(parts) < 3:
+            return
+        _, mode, inn = parts
+        chat_id = update.effective_chat.id
+        report_data = _ai_cache.get(chat_id)
+
+        if not report_data:
+            await query.edit_message_text("❌ Данные устарели. Запросите новый анализ.")
+            return
+
+        await query.edit_message_text("⏳ Генерирую AI-резюме...")
+        ai_result = await agent_ai_summary.fetch(report_data, mode=mode)
+        summary = ai_result.get("summary", "❌ Ошибка генерации")
+
+        mode_labels = {"brief": "📄 Кратко", "detailed": "📊 Детально", "compare": "📈 Сравнение"}
+        header = f"🧠 <b>AI-анализ ({mode_labels.get(mode, mode)})</b>"
+        qa_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("❓ Задать вопрос", callback_data=f"qa|{inn}")]
+        ])
+        await query.edit_message_text(
+            f"{header}\n\n{summary}",
+            parse_mode="HTML",
+            reply_markup=qa_keyboard,
+        )
+
+    elif data.startswith("qa|"):
+        _, inn = data.split("|", 1)
+        chat_id = update.effective_chat.id
+        report_data = _ai_cache.get(chat_id)
+        if not report_data:
+            await query.edit_message_text("❌ Данные устарели. Запросите новый анализ.")
+            return
+        _qa_waiting.add(chat_id)
+        await query.edit_message_text(
+            "✏️ Напишите ваш вопрос о компании одним сообщением."
+        )
+
+
 async def _run_bot():
-    from telegram.ext import Application, CommandHandler, MessageHandler, filters
+    from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
     from telegram.error import Conflict
 
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CallbackQueryHandler(ai_callback, pattern=r"^(ai|qa)\|"))
 
     await app.initialize()
-    await app.updater.start_polling(allowed_updates=["messages"], drop_pending_updates=True)
+    await app.updater.start_polling(allowed_updates=["messages", "callback_query"], drop_pending_updates=True)
     logger.info("Бот запущен. Напишите /start в Telegram")
 
     try:
